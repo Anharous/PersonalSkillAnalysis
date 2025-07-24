@@ -21,10 +21,15 @@ export default function LearningPath() {
 
   const handleCompleteModule = (moduleId: string, xpReward: number) => {
     completeModule(moduleId);
-    updateUser({ 
-      xp: (user?.xp || 0) + xpReward,
-      level: Math.floor(((user?.xp || 0) + xpReward) / 1000) + 1
-    });
+    
+    // Update user XP locally for immediate feedback
+    // The backend will handle the actual XP update
+    if (user) {
+      updateUser({ 
+        xp: (user?.xp || 0) + xpReward,
+        level: Math.floor(((user?.xp || 0) + xpReward) / 1000) + 1
+      });
+    }
   };
 
   const getModuleIcon = (type: string) => {

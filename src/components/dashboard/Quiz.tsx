@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { quizAPI } from '../../services/api';
 import {
   Brain,
   Clock,
@@ -16,6 +17,7 @@ export default function Quiz() {
   const { user, updateUser } = useAuth();
   const { quizzes, updateQuizScore } = useData();
   const [selectedQuiz, setSelectedQuiz] = useState<string | null>(null);
+  const [currentAttempt, setCurrentAttempt] = useState<any>(null);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -41,6 +43,8 @@ export default function Quiz() {
   };
 
   const startQuiz = (quizId: string) => {
+    if (!user) return;
+    
     setSelectedQuiz(quizId);
     setCurrentQuestion(0);
     setAnswers([]);
@@ -48,6 +52,15 @@ export default function Quiz() {
     setShowResult(false);
     setTimeLeft(300);
     setQuizStarted(true);
+    
+    // Start quiz attempt in backend
+    quizAPI.startQuiz(quizId, user.id)
+      .then(response => {
+        setCurrentAttempt(response.data);
+      })
+      .catch(error => {
+        console.error('Failed to start quiz:', error);
+      });
   };
 
   const handleAnswerSelect = (answerIndex: number) => {
@@ -76,13 +89,37 @@ export default function Quiz() {
     ).length;
     
     const score = Math.round((correctAnswers / currentQuiz.questions.length) * 100);
-    const xpGained = Math.max(50, score);
     
-    updateQuizScore(currentQuiz.id, score);
-    updateUser({ 
-      xp: (user?.xp || 0) + xpGained,
-      level: Math.floor(((user?.xp || 0) + xpGained) / 1000) + 1
-    });
+    // Submit quiz attempt to backend
+    if (currentAttempt && user) {
+      const attemptData = {
+        ...currentAttempt,
+        answers: finalAnswers.map((answer, index) => ({
+          questionId: currentQuiz.questions[index]?.id,
+          selectedOption: answer,
+          correct: answer === currentQuiz.questions[index]?.correct,
+          timeSpent: 30 // Approximate time per question
+        })),
+        timeTaken: 300 - timeLeft,
+        completed: true
+      };
+      
+      quizAPI.submitQuiz(currentAttempt.id, attemptData)
+        .then(response => {
+          const submittedAttempt = response.data;
+          updateQuizScore(currentQuiz.id, submittedAttempt.score);
+          
+          // Update user XP (this will be handled by backend, but update locally for immediate feedback)
+          const xpGained = Math.max(50, submittedAttempt.score);
+          updateUser({ 
+            xp: (user?.xp || 0) + xpGained,
+            level: Math.floor(((user?.xp || 0) + xpGained) / 1000) + 1
+          });
+        })
+        .catch(error => {
+          console.error('Failed to submit quiz:', error);
+        });
+    }
     
     setShowResult(true);
     setQuizStarted(false);

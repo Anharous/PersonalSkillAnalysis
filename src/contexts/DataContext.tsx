@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { quizAPI, learningAPI } from '../services/api';
+import { useAuth } from './AuthContext';
 
 interface Quiz {
   id: string;
@@ -40,98 +42,126 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [quizzes, setQuizzes] = useState<Quiz[]>([
-    {
-      id: 'react-basics',
-      title: 'React Fundamentals',
-      completed: false,
-      questions: [
-        {
-          id: '1',
-          question: 'What is JSX?',
-          options: ['JavaScript XML', 'Java Syntax Extension', 'JSON Extension', 'JavaScript eXtension'],
-          correct: 0,
-          difficulty: 'easy',
-          skill: 'React'
-        },
-        {
-          id: '2',
-          question: 'Which hook is used for state management in functional components?',
-          options: ['useEffect', 'useState', 'useContext', 'useReducer'],
-          correct: 1,
-          difficulty: 'medium',
-          skill: 'React'
-        }
-      ]
-    },
-    {
-      id: 'python-advanced',
-      title: 'Python Advanced Concepts',
-      completed: false,
-      questions: [
-        {
-          id: '1',
-          question: 'What is a decorator in Python?',
-          options: ['A design pattern', 'A function that modifies another function', 'A data structure', 'A built-in module'],
-          correct: 1,
-          difficulty: 'hard',
-          skill: 'Python'
-        }
-      ]
-    }
-  ]);
+  const { user } = useAuth();
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [learningModules, setLearningModules] = useState<LearningModule[]>([]);
+  const [userAttempts, setUserAttempts] = useState<any[]>([]);
+  const [userProgress, setUserProgress] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [learningModules, setLearningModules] = useState<LearningModule[]>([
-    {
-      id: 'react-hooks-deep-dive',
-      title: 'React Hooks Deep Dive',
-      description: 'Master advanced React hooks and custom hook patterns',
-      skill: 'React',
-      difficulty: 'Intermediate',
-      duration: '45 min',
-      type: 'video',
-      url: '#',
-      completed: false,
-      xpReward: 200
-    },
-    {
-      id: 'python-data-structures',
-      title: 'Python Data Structures & Algorithms',
-      description: 'Learn efficient data structures and algorithm implementation',
-      skill: 'Python',
-      difficulty: 'Advanced',
-      duration: '60 min',
-      type: 'practice',
-      url: '#',
-      completed: false,
-      xpReward: 300
-    },
-    {
-      id: 'system-design-basics',
-      title: 'System Design Fundamentals',
-      description: 'Understanding scalable system architecture',
-      skill: 'System Design',
-      difficulty: 'Intermediate',
-      duration: '90 min',
-      type: 'article',
-      url: '#',
-      completed: false,
-      xpReward: 250
+  // Load data when user is available
+  useEffect(() => {
+    if (user) {
+      loadData();
     }
-  ]);
+  }, [user]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load quizzes
+      const quizzesResponse = await quizAPI.getAllQuizzes();
+      const quizzesData = quizzesResponse.data.map((quiz: any) => ({
+        id: quiz.id,
+        title: quiz.title,
+        completed: false, // Will be updated based on user attempts
+        questions: quiz.questions.map((q: any) => ({
+          id: q.id,
+          question: q.question,
+          options: q.options,
+          correct: q.correctAnswer,
+          difficulty: q.difficulty.toLowerCase(),
+          skill: quiz.skill
+        }))
+      }));
+      
+      // Load learning modules
+      const modulesResponse = await learningAPI.getAllModules();
+      const modulesData = modulesResponse.data.map((module: any) => ({
+        id: module.id,
+        title: module.title,
+        description: module.description,
+        skill: module.skill,
+        difficulty: module.difficulty,
+        duration: module.duration,
+        type: module.type.toLowerCase(),
+        url: module.url,
+        completed: false, // Will be updated based on user progress
+        xpReward: module.xpReward
+      }));
+      
+      // Load user attempts and progress if user is logged in
+      if (user) {
+        const attemptsResponse = await quizAPI.getUserAttempts(user.id);
+        const progressResponse = await learningAPI.getUserProgress(user.id);
+        
+        setUserAttempts(attemptsResponse.data);
+        setUserProgress(progressResponse.data);
+        
+        // Update completion status based on user data
+        const updatedQuizzes = quizzesData.map((quiz: Quiz) => {
+          const attempt = attemptsResponse.data.find((a: any) => a.quizId === quiz.id && a.completed);
+          return {
+            ...quiz,
+            completed: !!attempt,
+            score: attempt?.score
+          };
+        });
+        
+        const updatedModules = modulesData.map((module: LearningModule) => {
+          const progress = progressResponse.data.find((p: any) => p.moduleId === module.id);
+          return {
+            ...module,
+            completed: progress?.status === 'COMPLETED'
+          };
+        });
+        
+        setQuizzes(updatedQuizzes);
+        setLearningModules(updatedModules);
+      } else {
+        setQuizzes(quizzesData);
+        setLearningModules(modulesData);
+      }
+      
+    } catch (error) {
+      console.error('Failed to load data:', error);
+      // Fallback to empty arrays
+      setQuizzes([]);
+      setLearningModules([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const [skillGaps] = useState<string[]>(['Python', 'System Design', 'Docker', 'AWS']);
 
-  const updateQuizScore = (quizId: string, score: number) => {
-    setQuizzes(prev => prev.map(quiz => 
-      quiz.id === quizId ? { ...quiz, completed: true, score } : quiz
-    ));
+  const updateQuizScore = async (quizId: string, score: number) => {
+    try {
+      // Update local state immediately
+      setQuizzes(prev => prev.map(quiz => 
+        quiz.id === quizId ? { ...quiz, completed: true, score } : quiz
+      ));
+      
+      // The score update will be handled by the backend when quiz is submitted
+    } catch (error) {
+      console.error('Failed to update quiz score:', error);
+    }
   };
 
-  const completeModule = (moduleId: string) => {
-    setLearningModules(prev => prev.map(module => 
-      module.id === moduleId ? { ...module, completed: true } : module
-    ));
+  const completeModule = async (moduleId: string) => {
+    try {
+      if (user) {
+        await learningAPI.completeModule(user.id, moduleId);
+        
+        // Update local state
+        setLearningModules(prev => prev.map(module => 
+          module.id === moduleId ? { ...module, completed: true } : module
+        ));
+      }
+    } catch (error) {
+      console.error('Failed to complete module:', error);
+    }
   };
 
   const getRecommendedModules = (skills: string[]) => {
@@ -147,7 +177,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       skillGaps,
       updateQuizScore,
       completeModule,
-      getRecommendedModules
+      getRecommendedModules,
+      loading
     }}>
       {children}
     </DataContext.Provider>

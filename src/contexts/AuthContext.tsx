@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { authAPI, userAPI } from '../services/api';
 
 interface User {
   id: string;
@@ -30,79 +31,96 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate loading user from localStorage
+    // Check for existing token and validate
+    const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
+    
+    if (token && savedUser) {
+      // Validate token with backend
+      authAPI.validateToken()
+        .then(response => {
+          setUser(JSON.parse(savedUser));
+        })
+        .catch(() => {
+          // Token invalid, clear storage
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    } else {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    // Mock login - in real app, this would call your Python backend
-    if (email === 'admin@company.com' && password === 'admin123') {
-      const adminUser: User = {
-        id: 'admin-1',
-        email,
-        name: 'System Admin',
-        role: 'admin',
-        profileComplete: true,
-        skills: [],
-        currentRole: 'Administrator',
-        desiredRole: 'Administrator',
-        xp: 0,
-        level: 1,
-        badges: []
+    try {
+      const response = await authAPI.login(email, password);
+      const { token, user: userData } = response.data;
+      
+      // Store token and user data
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      
+      // Convert backend user format to frontend format
+      const user: User = {
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role.toLowerCase(),
+        profileComplete: userData.profileComplete,
+        skills: userData.skills || [],
+        currentRole: userData.currentRole || '',
+        desiredRole: userData.desiredRole || '',
+        xp: userData.xp || 0,
+        level: userData.level || 1,
+        badges: userData.badges || []
       };
-      setUser(adminUser);
-      localStorage.setItem('user', JSON.stringify(adminUser));
+      
+      setUser(user);
       return true;
+    } catch (error) {
+      console.error('Login failed:', error);
+      return false;
     }
-    
-    if (email === 'employee@company.com' && password === 'employee123') {
-      const employeeUser: User = {
-        id: 'emp-1',
-        email,
-        name: 'John Developer',
-        role: 'employee',
-        profileComplete: false,
-        skills: ['JavaScript', 'React', 'Node.js'],
-        currentRole: 'Junior Developer',
-        desiredRole: 'Senior Full Stack Developer',
-        xp: 1250,
-        level: 3,
-        badges: ['First Steps', 'Quiz Master']
-      };
-      setUser(employeeUser);
-      localStorage.setItem('user', JSON.stringify(employeeUser));
-      return true;
-    }
-    
-    return false;
   };
 
   const signup = async (email: string, password: string, name: string): Promise<boolean> => {
-    // Mock signup
-    const newUser: User = {
-      id: Date.now().toString(),
-      email,
-      name,
-      role: 'employee',
-      profileComplete: false,
-      skills: [],
-      currentRole: '',
-      desiredRole: '',
-      xp: 0,
-      level: 1,
-      badges: []
-    };
-    setUser(newUser);
-    localStorage.setItem('user', JSON.stringify(newUser));
-    return true;
+    try {
+      const response = await authAPI.signup(name, email, password);
+      const { token, user: userData } = response.data;
+      
+      // Store token and user data
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      
+      // Convert backend user format to frontend format
+      const user: User = {
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role.toLowerCase(),
+        profileComplete: userData.profileComplete,
+        skills: userData.skills || [],
+        currentRole: userData.currentRole || '',
+        desiredRole: userData.desiredRole || '',
+        xp: userData.xp || 0,
+        level: userData.level || 1,
+        badges: userData.badges || []
+      };
+      
+      setUser(user);
+      return true;
+    } catch (error) {
+      console.error('Signup failed:', error);
+      return false;
+    }
   };
 
   const logout = () => {
     setUser(null);
+    localStorage.removeItem('token');
     localStorage.removeItem('user');
   };
 
@@ -111,6 +129,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const updatedUser = { ...user, ...updates };
       setUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
+      
+      // Update user in backend
+      userAPI.updateProfile(user.id, updates).catch(console.error);
     }
   };
 
